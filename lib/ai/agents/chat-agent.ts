@@ -328,18 +328,25 @@ export async function processChatAgent(
   const { fetchRelevantMemories, saveInteractionMemory, isMem0EnabledAsync } = await import('@/lib/ai/mem0-client')
 
   let memoryContext = { systemPromptAddition: '', memoryCount: 0 }
-  const mem0Enabled = await isMem0EnabledAsync()
-  if (mem0Enabled) {
-    console.log(`[chat-agent] Mem0 enabled, fetching memories for ${conversation.phone}...`)
-    memoryContext = await fetchRelevantMemories(inputText, {
-      user_id: conversation.phone,
-      agent_id: agent.id,
-    })
-    if (memoryContext.memoryCount > 0) {
-      console.log(`[chat-agent] Found ${memoryContext.memoryCount} memories`)
+  let mem0Enabled = false
+  try {
+    mem0Enabled = await isMem0EnabledAsync()
+    if (mem0Enabled) {
+      console.log(`[chat-agent] Mem0 enabled, fetching memories for ${conversation.phone}...`)
+      memoryContext = await fetchRelevantMemories(inputText, {
+        user_id: conversation.phone,
+        agent_id: agent.id,
+      })
+      if (memoryContext.memoryCount > 0) {
+        console.log(`[chat-agent] Found ${memoryContext.memoryCount} memories`)
+      }
+    } else {
+      console.log(`[chat-agent] Mem0 disabled (configure mem0_enabled e mem0_api_key nas settings)`)
     }
-  } else {
-    console.log(`[chat-agent] Mem0 disabled (configure mem0_enabled e mem0_api_key nas settings)`)
+  } catch (mem0Error) {
+    // Falha no Mem0 não deve derrubar o agente — continua sem memória
+    console.warn(`[chat-agent] Mem0 unavailable (degradação graceful):`, mem0Error instanceof Error ? mem0Error.message : mem0Error)
+    mem0Enabled = false
   }
 
   // Get model configuration - supports Google, OpenAI, Anthropic
@@ -369,7 +376,13 @@ export async function processChatAgent(
   console.log(`[chat-agent] Using provider: ${provider}, model: ${modelId}`)
 
   // Check if agent has indexed content in pgvector
-  const hasKnowledgeBase = await hasIndexedContent(agent.id)
+  let hasKnowledgeBase = false
+  try {
+    hasKnowledgeBase = await hasIndexedContent(agent.id)
+  } catch (ragError) {
+    // Falha no pgvector não deve derrubar o agente — continua sem RAG
+    console.warn(`[chat-agent] pgvector check unavailable (degradação graceful):`, ragError instanceof Error ? ragError.message : ragError)
+  }
 
   console.log(`[chat-agent] Processing: model=${modelId}, hasKnowledgeBase=${hasKnowledgeBase}`)
   console.log(`[chat-agent] Total messages received: ${messages.length}`)
@@ -668,20 +681,25 @@ export async function processChatAgent(
 
       // Se é retry, adiciona instrução reforçada ao system prompt
       let currentSystemPrompt = systemPrompt
+      // Usa cópia do array base para não acumular contexto de retries entre iterações
+      let currentMessages = [...aiMessages]
       if (retryCount > 0) {
         console.log(`[chat-agent] 🔄 Retry ${retryCount}/${MAX_TOOL_RETRIES} - LLM não chamou respond tool`)
         currentSystemPrompt += `\n\n## INSTRUÇÃO CRÍTICA\nVocê DEVE chamar a tool "respond" para enviar sua resposta. NÃO responda com texto direto. Use a tool respond com message, sentiment e confidence.`
 
-        // Adiciona o texto anterior como contexto se houver
+        // Adiciona o texto anterior como contexto na CÓPIA, sem mutar o array original
         if (lastLLMText) {
-          aiMessages.push({
-            role: 'assistant',
-            content: lastLLMText,
-          })
-          aiMessages.push({
-            role: 'user',
-            content: '[SISTEMA] Você precisa usar a tool "respond" para enviar sua resposta. Reformule sua resposta anterior usando a tool.',
-          })
+          currentMessages = [
+            ...currentMessages,
+            {
+              role: 'assistant' as const,
+              content: lastLLMText,
+            },
+            {
+              role: 'user' as const,
+              content: '[SISTEMA] Você precisa usar a tool "respond" para enviar sua resposta. Reformule sua resposta anterior usando a tool.',
+            },
+          ]
         }
       }
 
@@ -689,7 +707,7 @@ export async function processChatAgent(
         const result = await generateText({
           model,
           system: currentSystemPrompt,
-          messages: aiMessages,
+          messages: currentMessages,
           tools,
           toolChoice: 'required', // FORÇA o LLM a chamar uma tool (respond)
           // Para quando respond for chamado OU após 3 steps (o que vier primeiro)

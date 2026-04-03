@@ -73,51 +73,63 @@ async function getHeliconeConfig(): Promise<{ apiKey: string } | null> {
 }
 
 /**
+ * Resolve o token de autenticação para o AI Gateway.
+ *
+ * Prioridade:
+ * 1. AI_GATEWAY_API_KEY (estático, não expira — preferido para produção)
+ * 2. gatewayConfig.apiKey (configurado no banco de dados)
+ * 3. VERCEL_OIDC_TOKEN (curta duração, expira a cada 12-24h)
+ */
+function resolveGatewayAuthToken(gatewayConfig: AiGatewayConfig): string | null {
+  return (
+    process.env.AI_GATEWAY_API_KEY ||
+    gatewayConfig.apiKey ||
+    process.env.VERCEL_OIDC_TOKEN ||
+    null
+  )
+}
+
+/**
  * Cria modelo de linguagem via Vercel AI Gateway.
  *
- * O Gateway usa autenticação OIDC (não API key manual):
- * - Em Vercel (prod/preview): token OIDC é injetado automaticamente
- * - Local com `vercel dev`: token é obtido automaticamente
- * - Local com `npm run dev`: requer `vercel env pull` (token expira a cada 12h)
+ * Autenticação (em ordem de prioridade):
+ * 1. AI_GATEWAY_API_KEY — chave estática, não expira, preferida para produção
+ * 2. gatewayConfig.apiKey — configurado via painel SmartZap
+ * 3. VERCEL_OIDC_TOKEN — curta duração (12-24h), requer `vercel env pull` localmente
  *
  * @param gatewayConfig Configuração do Gateway
  * @param provider Provider original (google, openai, anthropic)
  * @param modelId ID do modelo (ex: gemini-2.5-flash)
  * @param allApiKeys Todas as API keys disponíveis (para BYOK com fallbacks)
+ * @param authToken Token de autenticação já resolvido
  */
 async function createGatewayModel(
   gatewayConfig: AiGatewayConfig,
   provider: AIProvider,
   modelId: string,
-  allApiKeys: Partial<Record<AIProvider, string>>
+  allApiKeys: Partial<Record<AIProvider, string>>,
+  authToken: string
 ): Promise<LanguageModel> {
-  // OIDC token já foi verificado antes de chamar esta função
-  const oidcToken = process.env.VERCEL_OIDC_TOKEN!
-
   const { createOpenAI } = await import('@ai-sdk/openai')
 
   const gatewayModelId = toGatewayModelId(provider, modelId)
 
-  // Headers para o Gateway - apenas OIDC
-  // NOTA: BYOK agora é configurado via providerOptions.gateway.byok no generateText,
-  // não mais via headers. Isso permite usar 'only' para forçar BYOK-only (sem fallback para system credentials).
   const headers: Record<string, string> = {
-    // Token OIDC para autenticação no Gateway
-    Authorization: `Bearer ${oidcToken}`,
+    Authorization: `Bearer ${authToken}`,
   }
 
   if (gatewayConfig.useBYOK) {
     const configuredProviders = Object.keys(allApiKeys).filter(p => allApiKeys[p as AIProvider])
-    console.log(`[provider-factory] BYOK will be configured via providerOptions.gateway for: ${configuredProviders.join(', ')}`)
+    console.log(`[provider-factory] BYOK configurado via providerOptions.gateway para: ${configuredProviders.join(', ')}`)
   }
 
   const openai = createOpenAI({
-    apiKey: 'dummy', // Não usado, autenticação é via OIDC
+    apiKey: 'dummy', // Autenticação é via Authorization header
     baseURL: AI_GATEWAY_BASE_URL,
     headers,
   })
 
-  console.log(`[provider-factory] AI Gateway enabled: ${gatewayModelId}`)
+  console.log(`[provider-factory] AI Gateway: ${gatewayModelId}`)
 
   return openai(gatewayModelId)
 }
@@ -134,7 +146,9 @@ export interface ProviderConfig {
   apiKey: string
 }
 
-// Mapeamento de provider para chave de API na tabela settings
+// Mapeamento de provider para chave de API na tabela settings.
+// NOTA: Essas chaves são usadas como BYOK (Bring Your Own Key) — passadas AO Gateway
+// via providerOptions.gateway.byok. Não bypassa o Gateway; roteiam ATRAVÉS dele.
 const PROVIDER_API_KEY_MAP: Record<AIProvider, { settingKey: string; envVar: string }> = {
   google: { settingKey: 'gemini_api_key', envVar: 'GEMINI_API_KEY' },
   openai: { settingKey: 'openai_api_key', envVar: 'OPENAI_API_KEY' },
@@ -266,16 +280,19 @@ export async function createLanguageModel(
   // Verifica se AI Gateway está habilitado
   const gatewayConfig = await getAiGatewayConfig()
 
-  // Gateway requer OIDC token (disponível em Vercel ou via `vercel dev`)
-  const oidcToken = process.env.VERCEL_OIDC_TOKEN
-  const canUseGateway = gatewayConfig.enabled && oidcToken
+  // Resolve auth: AI_GATEWAY_API_KEY (estático) > gatewayConfig.apiKey (DB) > VERCEL_OIDC_TOKEN (expira)
+  const gatewayAuthToken = resolveGatewayAuthToken(gatewayConfig)
+  const canUseGateway = gatewayConfig.enabled && gatewayAuthToken
 
-  if (gatewayConfig.enabled && !oidcToken) {
-    console.warn('[provider-factory] Gateway habilitado mas VERCEL_OIDC_TOKEN não encontrado. Usando conexão direta.')
+  if (gatewayConfig.enabled && !gatewayAuthToken) {
+    console.warn(
+      '[provider-factory] Gateway habilitado mas nenhum token de auth encontrado. ' +
+      'Configure AI_GATEWAY_API_KEY ou execute `vercel env pull`. Usando conexão direta.'
+    )
   }
 
   if (canUseGateway) {
-    // Busca TODAS as API keys para habilitar fallbacks no Gateway
+    // Busca TODAS as API keys para habilitar BYOK no Gateway
     const allApiKeys = await getAllProviderApiKeys()
     const primaryApiKey = apiKeyOverride || allApiKeys[provider]
 
@@ -291,7 +308,7 @@ export async function createLanguageModel(
     }
 
     // Usa AI Gateway para routing inteligente com fallbacks
-    const model = await createGatewayModel(gatewayConfig, provider, modelId, allApiKeys)
+    const model = await createGatewayModel(gatewayConfig, provider, modelId, allApiKeys, gatewayAuthToken)
     return { model, provider, apiKey: primaryApiKey, gatewayConfig, allApiKeys, usingGateway: true }
   }
 

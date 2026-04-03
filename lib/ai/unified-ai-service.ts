@@ -181,15 +181,24 @@ async function getLanguageModel(
     // Verifica se AI Gateway está habilitado
     const gatewayConfig = await getAiGatewayConfig();
 
-    // Gateway requer OIDC token (disponível em Vercel ou via `vercel dev`)
-    const oidcToken = process.env.VERCEL_OIDC_TOKEN;
-    if (gatewayConfig.enabled) {
-        console.log(`[AI Service] VERCEL_OIDC_TOKEN ${oidcToken ? 'present' : 'missing'}`);
-    }
-    const canUseGateway = gatewayConfig.enabled && oidcToken;
+    // Resolve auth: AI_GATEWAY_API_KEY (estático) > gatewayConfig.apiKey (DB) > VERCEL_OIDC_TOKEN (expira)
+    const gatewayAuthToken =
+        process.env.AI_GATEWAY_API_KEY ||
+        gatewayConfig.apiKey ||
+        process.env.VERCEL_OIDC_TOKEN ||
+        null;
 
-    if (gatewayConfig.enabled && !oidcToken) {
-        console.warn('[AI Service] Gateway habilitado mas VERCEL_OIDC_TOKEN não encontrado. Usando conexão direta.');
+    if (gatewayConfig.enabled) {
+        const source = process.env.AI_GATEWAY_API_KEY ? 'AI_GATEWAY_API_KEY'
+            : gatewayConfig.apiKey ? 'db.apiKey'
+            : process.env.VERCEL_OIDC_TOKEN ? 'VERCEL_OIDC_TOKEN'
+            : 'none';
+        console.log(`[AI Service] Gateway auth source: ${source}`);
+    }
+    const canUseGateway = gatewayConfig.enabled && gatewayAuthToken;
+
+    if (gatewayConfig.enabled && !gatewayAuthToken) {
+        console.warn('[AI Service] Gateway habilitado mas nenhum token de auth encontrado. Configure AI_GATEWAY_API_KEY ou execute `vercel env pull`. Usando conexão direta.');
     }
 
     if (canUseGateway) {
@@ -200,8 +209,7 @@ async function getLanguageModel(
 
         // Headers para o Gateway
         const headers: Record<string, string> = {
-            // Token OIDC para autenticação no Gateway
-            Authorization: `Bearer ${oidcToken}`,
+            Authorization: `Bearer ${gatewayAuthToken}`,
         };
 
         // BYOK: passa a chave do provider se configurado

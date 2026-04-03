@@ -60,15 +60,15 @@ export const DEFAULT_AI_FALLBACK: AiFallbackConfig = {
 }
 
 /**
- * Default: Gateway desabilitado (opt-in).
- * Quando habilitado, usa BYOK automaticamente com as chaves já configuradas.
- * NOTA: Desabilitado por default devido ao bug #11280 (BYOK não funciona com créditos zerados).
+ * Default: Gateway habilitado com BYOK.
+ * Autenticação via AI_GATEWAY_API_KEY (estático, não expira) ou VERCEL_OIDC_TOKEN (fallback).
+ * BYOK: passa as chaves dos providers configurados no SmartZap — zero markup no Gateway.
  */
 export const DEFAULT_AI_GATEWAY: AiGatewayConfig = {
-  enabled: false,
+  enabled: true,
   apiKey: '',
   useBYOK: true,
-  fallbackModels: ['anthropic/claude-sonnet-4-5', 'openai/gpt-5-mini'],
+  fallbackModels: ['anthropic/claude-haiku-4.5', 'openai/gpt-5.4'],
 }
 
 /**

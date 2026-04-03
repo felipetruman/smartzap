@@ -19,7 +19,7 @@ import {
   Drama,
   Target,
 } from 'lucide-react'
-// import { AIGatewayPanel } from '@/components/features/settings/AIGatewayPanel' // DESABILITADO (bug #11280)
+import { AIGatewayPanel } from '@/components/features/settings/AIGatewayPanel'
 import { HeliconePanel } from '@/components/features/settings/HeliconePanel'
 import { Mem0Panel } from '@/components/features/settings/Mem0Panel'
 import { Page, PageActions, PageDescription, PageHeader, PageTitle } from '@/components/ui/page'
@@ -994,9 +994,8 @@ export default function AICenterPage() {
         {/* Mem0 Memory Section */}
         <Mem0Panel />
 
-        {/* AI Gateway Section - DESABILITADO temporariamente (bug #11280: BYOK não funciona com créditos zerados)
+        {/* AI Gateway Section */}
         <AIGatewayPanel />
-        */}
 
         {/* Helicone Observability Section (usado quando Gateway desabilitado) */}
         <HeliconePanel />
