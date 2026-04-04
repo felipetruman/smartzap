@@ -488,6 +488,93 @@ function PromptCard({
   )
 }
 
+// ─── Stepper de ativação do AI Gateway ───────────────────────────────────────
+
+type ActivationPhase = 'idle' | 'saving' | 'deploying' | 'ready' | 'error'
+
+const ACTIVATION_STEPS: Array<{
+  key: ActivationPhase
+  label: string
+  activeLabel: string
+}> = [
+  { key: 'saving',    label: 'Chave validada e salva',      activeLabel: 'Validando e salvando...' },
+  { key: 'deploying', label: 'Env var atualizada no Vercel', activeLabel: 'Atualizando Vercel e iniciando redeploy...' },
+  { key: 'ready',     label: 'AI Gateway ativo',            activeLabel: 'Build concluído!' },
+]
+
+const PHASE_ORDER: ActivationPhase[] = ['saving', 'deploying', 'ready']
+
+function GatewayActivationStepper({ phase }: { phase: ActivationPhase }) {
+  const isError = phase === 'error'
+  const currentIndex = PHASE_ORDER.indexOf(phase)
+
+  return (
+    <div className={`mb-4 rounded-2xl border px-4 py-4 ${
+      isError
+        ? 'border-red-500/20 bg-red-500/5'
+        : phase === 'ready'
+          ? 'border-emerald-500/20 bg-emerald-500/5'
+          : 'border-violet-500/20 bg-violet-500/5'
+    }`}>
+      <div className="mb-3 flex items-center gap-2">
+        {isError ? (
+          <span className="size-4 rounded-full border border-red-500/40 bg-red-500/20 flex items-center justify-center text-red-400 text-[10px]">✕</span>
+        ) : phase === 'ready' ? (
+          <span className="size-4 rounded-full border border-emerald-500/40 bg-emerald-500/20 flex items-center justify-center text-emerald-400 text-[10px]">✓</span>
+        ) : (
+          <Loader2 className="size-4 text-violet-400 animate-spin shrink-0" />
+        )}
+        <span className={`text-xs font-semibold ${
+          isError ? 'text-red-400' : phase === 'ready' ? 'text-emerald-400' : 'text-violet-300'
+        }`}>
+          {isError ? 'Falha na ativação' : phase === 'ready' ? 'AI Gateway ativado!' : 'Ativando AI Gateway...'}
+        </span>
+      </div>
+
+      {!isError && (
+        <div className="space-y-2 pl-1">
+          {ACTIVATION_STEPS.map((step, idx) => {
+            const done = currentIndex > idx || phase === 'ready'
+            const active = PHASE_ORDER[currentIndex] === step.key && phase !== 'ready'
+            return (
+              <div key={step.key} className="flex items-center gap-2.5">
+                <div className={`size-4 rounded-full border flex items-center justify-center shrink-0 transition-colors ${
+                  done
+                    ? 'border-emerald-500/50 bg-emerald-500/20'
+                    : active
+                      ? 'border-violet-500/50 bg-violet-500/10'
+                      : 'border-[var(--ds-border-subtle)]'
+                }`}>
+                  {done ? (
+                    <span className="text-emerald-400 text-[9px] font-bold">✓</span>
+                  ) : active ? (
+                    <Loader2 className="size-2.5 text-violet-400 animate-spin" />
+                  ) : null}
+                </div>
+                <span className={`text-xs transition-colors ${
+                  done
+                    ? 'text-[var(--ds-text-secondary)] line-through decoration-[var(--ds-text-muted)]'
+                    : active
+                      ? 'text-[var(--ds-text-primary)]'
+                      : 'text-[var(--ds-text-muted)]'
+                }`}>
+                  {active ? step.activeLabel : step.label}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {isError && (
+        <p className="text-xs text-red-400/80 pl-1">
+          A chave foi salva localmente. Tente salvar novamente para reativar o Gateway.
+        </p>
+      )}
+    </div>
+  )
+}
+
 export default function AICenterPage() {
   const {
     isDevMode,
@@ -509,6 +596,7 @@ export default function AICenterPage() {
     isSaving,
     isSavingKey,
     isActivating,
+    activationPhase,
     errorMessage,
     ocrConfig,
     mistralKeyDraft,
@@ -567,13 +655,8 @@ export default function AICenterPage() {
         </div>
       )}
 
-      {isActivating && (
-        <div className="mb-4 rounded-2xl border border-blue-500/20 bg-blue-500/10 px-4 py-3 text-xs text-blue-400 flex items-center gap-2">
-          <Loader2 className="size-3.5 animate-spin shrink-0" />
-          <span>
-            Chave salva. Ativando no AI Gateway — aguarde o redeploy (~2 min)...
-          </span>
-        </div>
+      {activationPhase !== 'idle' && (
+        <GatewayActivationStepper phase={activationPhase} />
       )}
 
       {/* Loading skeleton - evita flash de estado incorreto */}
@@ -622,6 +705,9 @@ export default function AICenterPage() {
           <ChevronDown className="size-4 -rotate-90 text-[var(--ds-text-muted)] transition group-hover:text-emerald-300" />
         </a>
       </div>
+
+      {/* AI Gateway Section */}
+      <AIGatewayPanel />
 
       <div className="space-y-6">
         <section className="glass-panel rounded-2xl p-6">
@@ -1004,9 +1090,6 @@ export default function AICenterPage() {
 
         {/* Mem0 Memory Section */}
         <Mem0Panel />
-
-        {/* AI Gateway Section */}
-        <AIGatewayPanel />
 
         {/* Helicone Observability Section (usado quando Gateway desabilitado) */}
         <HeliconePanel />

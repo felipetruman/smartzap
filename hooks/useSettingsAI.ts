@@ -117,6 +117,7 @@ export const useSettingsAIController = () => {
 
   // BYOK activation polling
   const [isActivating, setIsActivating] = useState(false)
+  const [activationPhase, setActivationPhase] = useState<'idle' | 'saving' | 'deploying' | 'ready' | 'error'>('idle')
   const activationPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // OCR State
@@ -283,6 +284,7 @@ export const useSettingsAIController = () => {
       return
     }
     setIsSavingKey(true)
+    setActivationPhase('saving')
     try {
       const result = await settingsService.saveAIConfig({
         apiKey,
@@ -294,15 +296,17 @@ export const useSettingsAIController = () => {
 
       if (result?.pendingActivation && result?.deploymentId) {
         setIsActivating(true)
-        toast.info('Chave salva. Ativando no AI Gateway (~2 min)...')
+        setActivationPhase('deploying')
         startActivationPolling(result.deploymentId)
       } else {
+        setActivationPhase('idle')
         toast.success('Chave atualizada')
       }
 
       await loadConfig()
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Erro ao salvar chave'
+      setActivationPhase('error')
       toast.error(message)
     } finally {
       setIsSavingKey(false)
@@ -323,12 +327,16 @@ export const useSettingsAIController = () => {
           clearInterval(activationPollRef.current!)
           activationPollRef.current = null
           setIsActivating(false)
+          setActivationPhase('ready')
           toast.success('AI Gateway ativado com sucesso!')
           await loadConfig()
+          // Limpa o estado após 5s para não poluir a UI
+          setTimeout(() => setActivationPhase('idle'), 5000)
         } else if (status === 'ERROR' || status === 'CANCELED') {
           clearInterval(activationPollRef.current!)
           activationPollRef.current = null
           setIsActivating(false)
+          setActivationPhase('error')
           toast.error('Falha na ativação do Gateway. Tente salvar a chave novamente.')
         }
       } catch {
@@ -489,6 +497,7 @@ export const useSettingsAIController = () => {
     isSaving,
     isSavingKey,
     isActivating,
+    activationPhase,
     errorMessage,
 
     // OCR
