@@ -603,6 +603,9 @@ export async function POST(req: Request) {
         { key: 'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY', value: anonKey, targets: [...envTargets] },
         { key: 'SUPABASE_SECRET_KEY', value: serviceRoleKey, targets: [...envTargets] },
         { key: 'QSTASH_TOKEN', value: qstash.token, targets: [...envTargets] },
+        // Região obrigatória us-east-1: o client de runtime (@upstash/qstash) lê QSTASH_URL;
+        // sem isso ele usa o host global, que retorna 404 para contas regionais.
+        { key: 'QSTASH_URL', value: 'https://qstash-us-east-1.upstash.io', targets: [...envTargets] },
         { key: 'UPSTASH_REDIS_REST_URL', value: redis.restUrl, targets: [...envTargets] },
         { key: 'UPSTASH_REDIS_REST_TOKEN', value: redis.restToken, targets: [...envTargets] },
         { key: 'MASTER_PASSWORD', value: passwordHash, targets: [...envTargets] },
