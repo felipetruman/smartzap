@@ -178,21 +178,10 @@ async function validateVercelToken(token: string): Promise<{ projectId: string; 
 }
 
 async function validateQStashToken(token: string): Promise<void> {
-  // Detecta região via JWT (mesmo padrão de /api/installer/qstash/validate)
-  let qstashBaseUrl = 'https://qstash.upstash.io';
-  try {
-    const payloadB64 = token.split('.')[1];
-    if (payloadB64) {
-      const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString());
-      if (payload.iss && typeof payload.iss === 'string') {
-        qstashBaseUrl = payload.iss.replace(/\/$/, '');
-      }
-    }
-  } catch {
-    // JWT indecodificável: usa fallback genérico
-  }
-
-  const res = await fetchWithTimeout(`${qstashBaseUrl}/v2/schedules`, {
+  // Endpoint US-East-1 (região obrigatória — mesmo host de /api/installer/qstash/validate).
+  // O token do QStash não é um JWT (base64 de {UserID,Password}), então não dá para
+  // derivar a região do próprio token; o host global retorna 404 para contas regionais.
+  const res = await fetchWithTimeout('https://qstash-us-east-1.upstash.io/v2/schedules', {
     headers: { Authorization: `Bearer ${token}` },
   });
 
